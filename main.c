@@ -230,6 +230,7 @@ WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR command_line, int show
 #else
     srand(time(0));
 #endif
+    rand();
 
     Transformation transformations[] = {
         {'X', "F+[[X]-X]-F[-FX]+X"},
@@ -407,8 +408,9 @@ WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR command_line, int show
                         continue;
                     }
 
-                    int flow = flow_at(particle->x, particle->y) * 2;
-                    if (is_valid(particle->x + flow, particle->y + 1))
+                    int flow = flow_at(particle->x, particle->y);
+                    if (is_valid(particle->x + flow, particle->y) &&
+                        is_valid(particle->x + flow, particle->y + 1))
                     {
                         particle->x += flow;
                         particle->y += 1;
@@ -422,12 +424,14 @@ WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR command_line, int show
                         // randomly check left or right first
                         if (rand() & 1)
                         {
-                            if (is_valid(particle->x + 1, particle->y + 1))
+                            if (is_valid(particle->x + 1, particle->y) &&
+                                is_valid(particle->x + 1, particle->y + 1))
                             {
                                 particle->x += 1;
                                 particle->y += 1;
                             }
-                            else if (is_valid(particle->x - 1, particle->y + 1))
+                            else if (is_valid(particle->x - 1, particle->y) &&
+                                     is_valid(particle->x - 1, particle->y + 1))
                             {
                                 particle->x -= 1;
                                 particle->y += 1;
@@ -440,12 +444,14 @@ WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR command_line, int show
                         }
                         else
                         {
-                            if (is_valid(particle->x - 1, particle->y + 1))
+                            if (is_valid(particle->x - 1, particle->y) && 
+                                is_valid(particle->x - 1, particle->y + 1))
                             {
                                 particle->x -= 1;
                                 particle->y += 1;
                             }
-                            else if (is_valid(particle->x + 1, particle->y + 1))
+                            else if (is_valid(particle->x + 1, particle->y) && 
+                                     is_valid(particle->x + 1, particle->y + 1))
                             {
                                 particle->x += 1;
                                 particle->y += 1;

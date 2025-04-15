@@ -1,3 +1,7 @@
 Rudimentary sand collision algorithm.
 
-Left Click places sand at cursor.
+- Left Mouse: Place sand at cursor.
+- 1: Sand
+- 2: Water
+- 3: Stone
+

@@ -7,74 +7,49 @@
 
 #define DEG2RAD(degrees) (degrees / 180.0f)
 
-#define WIDTH 1280
-#define HEIGHT 720
+#define WIDTH 800
+#define HEIGHT 600
 #define MAX_PARTICLE_COUNT (WIDTH * HEIGHT)
 
 #define ASSERT(expression) {if (!(expression)) {*(int*)0 = 0;}}
 
+typedef enum
+{
+    NONE_PARTICLE = 0,
+    SAND_PARTICLE = 0xC2BD8C,
+    WATER_PARTICLE = 0x5278C5,
+    STONE_PARTICLE = 0x3E3E3E,
+} ParticleType;
+
 typedef struct
 {
+    ParticleType type;
+    union
+    {
+        struct
+        {
+            uint8_t health;
+        } water;
+    };
+
     int x, y;
-    uint32_t color;
-    bool active;
 } Particle;
 
 uint32_t backbuffer[WIDTH * HEIGHT];
 Particle* collision_map[WIDTH * HEIGHT];
+Particle* new_collision_map[WIDTH * HEIGHT];
 Particle particles[MAX_PARTICLE_COUNT];
 
-// https://www.rapidtables.com/convert/color/hsv-to-rgb.html
-// NOTE: hue [0, 360) saturation and brightness [0, 1]
-static uint32_t
-hsb_to_rgb(float hue, float saturation, float brightness)
+static Particle*
+get_particle(int x, int y)
 {
-    ASSERT(hue >= 0.0f);
-    ASSERT(hue < 360.0f);
-    ASSERT(saturation >= 0.0f);
-    ASSERT(saturation <= 1.0f);
-    ASSERT(brightness >= 0.0f);
-    ASSERT(brightness <= 1.0f);
-
-    float c = brightness * saturation;
-    float x = c * (1.0f - abs(((int)(hue / 60.0f) & 1) - 1.0f));
-    float m = brightness - c;
-
-    float r = 0.0f, g = 0.0f, b = 0.0f;
-    if (hue < 60.0f)
+    if (x < 0 || x >= WIDTH ||
+        y < 0 || y >= HEIGHT)
     {
-        r = c;
-        g = x;
-    }
-    else if (hue < 120.0f)
-    {
-        r = x;
-        g = c;
-    }
-    else if (hue < 180.0f)
-    {
-        g = c;
-        b = x;
-    }
-    else if (hue < 240.0f)
-    {
-        g = x;
-        b = c;
-    }
-    else if (hue < 300.0f)
-    {
-        b = c;
-        r = x;
-    }
-    else if (hue < 360.0f)
-    {
-        b = x;
-        r = c;
+        return 0;
     }
 
-    return (uint32_t)((r + m) * 255.0f) << 16 |
-           (uint32_t)((g + m) * 255.0f) << 8 |
-           (uint32_t)((b + m) * 255.0f) << 0;
+    return collision_map[y * WIDTH + x];
 }
 
 static bool
@@ -86,7 +61,7 @@ is_valid(int x, int y)
         return false;
     }
 
-    return collision_map[y * WIDTH + x] == 0;
+    return get_particle(x, y) == 0;
 }
 
 // NOTE: returns -1, 0, or 1
@@ -113,20 +88,19 @@ put_pixel(int x, int y, uint32_t color)
     backbuffer[y * WIDTH + x] = color;
 }
 
-static void
-update_particle(Particle* particle)
+// NOTE: returns true upon successful movement
+static bool
+apply_gravity(Particle* particle)
 {
-    collision_map[particle->y * WIDTH + particle->x] = 0;
+    ASSERT(particle != 0);
 
     int wind_offset = rand_offset();
-    if (is_valid(particle->x + wind_offset, particle->y))
+    if (is_valid(particle->x + wind_offset, particle->y + 1))
     {
         particle->x += wind_offset;
-    }
-
-    if (is_valid(particle->x, particle->y + 1))
-    {
         particle->y += 1;
+
+        return true;
     }
     else
     {
@@ -137,18 +111,19 @@ update_particle(Particle* particle)
             {
                 particle->x += -1;
                 particle->y += 1;
+
+                return true;
             }
             else if (is_valid(particle->x + 1, particle->y) &&
                      is_valid(particle->x + 1, particle->y + 1))
             {
                 particle->x += 1;
                 particle->y += 1;
+
+                return true;
             }
-            else
-            {
-                particle->active = false;
-                collision_map[particle->y * WIDTH + particle->x] = particle;
-            }
+            
+            return false;
         }
         else
         {
@@ -157,20 +132,29 @@ update_particle(Particle* particle)
             {
                 particle->x += 1;
                 particle->y += 1;
+
+                return true;
             }
             else if (is_valid(particle->x - 1, particle->y) &&
                      is_valid(particle->x - 1, particle->y + 1))
             {
                 particle->x += -1;
                 particle->y += 1;
+
+                return true;
             }
-            else
-            {
-                particle->active = false;
-                collision_map[particle->y * WIDTH + particle->x] = particle;
-            }
+            
+            return false;
         }
     }
+
+    return false;
+}
+
+static void
+add_particle(ParticleType type, int x, int y)
+{
+    
 }
 
 extern int APIENTRY
@@ -225,7 +209,8 @@ WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR command_line, int show
     backbuffer_info.bmiHeader.biCompression = BI_RGB;
 
     int particle_count = 0;
-    int mouseX = 0, mouseY = 0;
+    int mouse_x = 0, mouse_y = 0;
+    ParticleType particle_brush_type = SAND_PARTICLE;
 
     while (IsWindow(window_handle))
     {
@@ -235,10 +220,29 @@ WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR command_line, int show
         MSG message;
         while (PeekMessageA(&message, 0, 0, 0, PM_REMOVE))
         {
-            if (message.message == WM_MOUSEMOVE)
+            if (message.message == WM_SYSKEYDOWN || message.message == WM_SYSKEYUP ||
+                message.message == WM_KEYDOWN || message.message == WM_KEYUP)
             {
-                mouseX = ((float)GET_X_LPARAM(message.lParam) / (float)clientRect.right) * WIDTH;
-                mouseY = ((float)GET_Y_LPARAM(message.lParam) / (float)clientRect.bottom) * HEIGHT;
+                uint8_t key_code = message.wParam;
+                bool key_down = ((message.lParam >> 31) & 1) != 1;
+
+                if (key_code == '1' && key_down)
+                {
+                    particle_brush_type = SAND_PARTICLE;
+                }
+                else if (key_code == '2' && key_down)
+                {
+                    particle_brush_type = WATER_PARTICLE;
+                }
+                else if (key_code == '3' && key_down)
+                {
+                    particle_brush_type = STONE_PARTICLE;
+                }
+            }
+            else if (message.message == WM_MOUSEMOVE)
+            {
+                mouse_x = ((float)GET_X_LPARAM(message.lParam) / (float)clientRect.right) * WIDTH;
+                mouse_y = ((float)GET_Y_LPARAM(message.lParam) / (float)clientRect.bottom) * HEIGHT;
             }
             else
             {
@@ -246,35 +250,134 @@ WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR command_line, int show
             }
         }
 
-        // clear background
         for (int y = 0; y < HEIGHT; y++)
         {
             for (int x = 0; x < WIDTH; x++)
             {
-                put_pixel(x, y, 0x022b5a);
+                new_collision_map[y * WIDTH + x] = collision_map[y * WIDTH + x];
             }
         }
 
         // update particles and draw
         for (int i = 0; i < MAX_PARTICLE_COUNT; i++)
         {
-            if (particles[i].active)
-            {
-                update_particle(&particles[i]);
-            }
+            Particle* particle = &particles[i];
 
-            put_pixel(particles[i].x, particles[i].y, particles[i].color);
+            new_collision_map[particle->y * WIDTH + particle->x] = 0;
+
+            switch (particle->type)
+            {
+            case SAND_PARTICLE:
+            {
+                apply_gravity(particle);
+
+                new_collision_map[particle->y * WIDTH + particle->x] = particle;
+
+                break;
+            }
+            case WATER_PARTICLE:
+            {
+                apply_gravity(particle);
+
+                new_collision_map[particle->y * WIDTH + particle->x] = particle;
+
+                Particle* below_particle = get_particle(particle->x, particle->y + 1);
+                Particle* above_particle = get_particle(particle->x, particle->y - 1);
+                if (below_particle != 0 && below_particle->type == SAND_PARTICLE ||
+                    above_particle != 0 && above_particle->type == SAND_PARTICLE)
+                {
+                    particle->water.health--;
+                }
+
+                if (particle->water.health <= 0)
+                {
+                    new_collision_map[particle->y * WIDTH + particle->x] = 0;
+                }
+
+                break;
+            }
+            case STONE_PARTICLE:
+            {
+                new_collision_map[particle->y * WIDTH + particle->x] = particle;
+
+                break;
+            }
+            default:
+            {
+                ASSERT("UNKNOWN PARTICLE TYPE!!!!!!!");
+
+                break;
+            }
+            }
         }
 
         // add particles
-        if ((GetKeyState(VK_LBUTTON) & 0x8000) && is_valid(mouseX, mouseY) &&
-            particle_count < MAX_PARTICLE_COUNT)
+        if ((GetKeyState(VK_LBUTTON) & 0x8000) &&
+            particle_count + 4 <= MAX_PARTICLE_COUNT)
         {
-            Particle* particle = &particles[particle_count++];
-            particle->x = mouseX;
-            particle->y = mouseY;
-            particle->color = 0xef00;
-            particle->active = true;
+            if (is_valid(mouse_x, mouse_y))
+            {
+                Particle* particle = &particles[particle_count++];
+
+                particle->x = mouse_x;
+                particle->y = mouse_y;
+                particle->type = particle_brush_type;
+                particle->water.health = 150;
+
+                new_collision_map[particle->y * WIDTH + particle->x] = particle;
+            }
+            if (is_valid(mouse_x + 1, mouse_y))
+            {
+                Particle* particle = &particles[particle_count++];
+
+                particle->x = mouse_x + 1;
+                particle->y = mouse_y;
+                particle->type = particle_brush_type;
+                particle->water.health = 150;
+
+                new_collision_map[particle->y * WIDTH + particle->x] = particle;
+            }
+            if (is_valid(mouse_x + 1, mouse_y + 1))
+            {
+                Particle* particle = &particles[particle_count++];
+
+                particle->x = mouse_x + 1;
+                particle->y = mouse_y + 1;
+                particle->type = particle_brush_type;
+                particle->water.health = 150;
+
+                new_collision_map[particle->y * WIDTH + particle->x] = particle;
+            }
+            if (is_valid(mouse_x, mouse_y + 1))
+            {
+                Particle* particle = &particles[particle_count++];
+
+                particle->x = mouse_x;
+                particle->y = mouse_y + 1;
+                particle->type = particle_brush_type;
+                particle->water.health = 150;
+
+                new_collision_map[particle->y * WIDTH + particle->x] = particle;
+            }
+        }
+
+        for (int y = 0; y < HEIGHT; y++)
+        {
+            for (int x = 0; x < WIDTH; x++)
+            {
+                Particle* particle = new_collision_map[y * WIDTH + x];
+
+                collision_map[y * WIDTH + x] = particle;
+
+                if (particle == 0)
+                {
+                    put_pixel(x, y, 0x022b5a);
+                }
+                else
+                {
+                    put_pixel(x, y, particle->type);
+                }
+            }
         }
 
         HDC window_DC = GetDC(window_handle);
